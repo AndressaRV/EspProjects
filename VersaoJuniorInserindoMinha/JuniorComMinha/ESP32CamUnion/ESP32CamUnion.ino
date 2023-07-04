@@ -6,8 +6,11 @@
 #include <HTTPClient.h>
 #include "BluetoothSerial.h"
 // MicroSD
-//#include "esp_vfs_fat.h"
-//#include "FS.h"
+#include "driver/sdmmc_host.h"
+#include "driver/sdmmc_defs.h"
+#include "sdmmc_cmd.h"
+#include "esp_vfs_fat.h"
+#include "FS.h"
 #include <SD_MMC.h>
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -56,6 +59,7 @@ int MagicNumber = 12;                // change this number to reset the eprom in
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 bool enviandoFoto = false;
 bool enviandoGPS = false;
+bool gravando = false;
 bool modoNoturno = false;
 bool InternetOff = true;
 bool reboot_now = false;
@@ -493,7 +497,17 @@ void btCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) { //recebe 
     }
     else if (stringRead.toInt() == 6) 
     {
-      start_record = 1;
+      if(gravando)
+      {
+        start_record = 0;
+        gravando = false;
+      }
+      else
+      {
+        frame_cnt = 0;
+        start_record = 1;
+        gravando = true;
+      }
     } 
   }
 }
@@ -538,6 +552,8 @@ static esp_err_t init_sdcard()
     Serial.println("Check pin 12 and 13, not grounded, or grounded with 10k resistors!\n\n");
     major_fail();
   }
+    sdmmc_host_t config = SDMMC_HOST_DEFAULT();
+    config.max_freq_khz = SDMMC_FREQ_PROBING;
 
   return ESP_OK;
 }
@@ -1404,12 +1420,12 @@ void setup() {
   baton = xSemaphoreCreateMutex();
 
   // prio 6 - higher than the camera loop()
-  xTaskCreatePinnedToCore( the_camera_loop, "the_camera_loop", 3000, NULL, 6, &the_camera_loop_task, 0); // prio 3, core 0 //v56 core 1 as http dominating 0 ... back to 0, raise prio
+  xTaskCreatePinnedToCore( the_camera_loop, "the_camera_loop", 3000, NULL, 5, &the_camera_loop_task, 0);
 
   delay(100);
 
   // prio 4 - higher than the cam_loop()
-  xTaskCreatePinnedToCore( the_sd_loop, "the_sd_loop", 2000, NULL, 4, &the_sd_loop_task, 1);  // prio 4, core 1
+  xTaskCreatePinnedToCore( the_sd_loop, "the_sd_loop", 2000, NULL, 4, &the_sd_loop_task, 0);  // prio 4, core 1
 
   delay(200);
 
@@ -1446,8 +1462,8 @@ void the_camera_loop (void* pvParameter) {
   Serial.print("the camera loop, core ");  Serial.print(xPortGetCoreID());
   Serial.print(", priority = "); Serial.println(uxTaskPriorityGet(NULL));
 
-  frame_cnt = 0;
-  start_record = 0;
+  //frame_cnt = 0;
+  //start_record = 0;
 
   delay(1000);
 
