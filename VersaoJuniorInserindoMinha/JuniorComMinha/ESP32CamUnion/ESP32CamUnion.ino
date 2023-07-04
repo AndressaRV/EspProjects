@@ -6,11 +6,8 @@
 #include <HTTPClient.h>
 #include "BluetoothSerial.h"
 // MicroSD
-#include "driver/sdmmc_host.h"
-#include "driver/sdmmc_defs.h"
-#include "sdmmc_cmd.h"
-#include "esp_vfs_fat.h"
-#include "FS.h"
+//#include "esp_vfs_fat.h"
+//#include "FS.h"
 #include <SD_MMC.h>
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1465,7 +1462,7 @@ void the_camera_loop (void* pvParameter) {
     if (frame_cnt == 0 && start_record == 0) {
 
       // Serial.println("Do nothing");
-      if (we_are_already_stopped == 0) Serial.println("\n\nDisconnect Pin 12 from GND to start recording.\n\n");
+      if (we_are_already_stopped == 0) Serial.println("\n\nNothing\n\n");
       we_are_already_stopped = 1;
       delay(100);
 
