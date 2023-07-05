@@ -46,14 +46,14 @@ String TIMEZONE = "GMT0BST,M3.5.0/01,M10.5.0/02";
 
 int framesize = FRAMESIZE_VGA;
 int quality = 12;
-int framesizeconfig = FRAMESIZE_UXGA;
-int qualityconfig = 5;
+int framesizeconfig = FRAMESIZE_VGA;
+int qualityconfig = 12;
 int buffersconfig = 3;
 int avi_length = 60;            // how long a movie in seconds -- 1800 sec = 30 min
 int frame_interval = 0;          // record at full speed
 int speed_up_factor = 1;          // play at realtime
 int stream_delay = 500;           // minimum of 500 ms delay between frames
-int MagicNumber = 12;                // change this number to reset the eprom in your esp32 for file numbers
+int MagicNumber = 13;                // change this number to reset the eprom in your esp32 for file numbers
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -552,8 +552,6 @@ static esp_err_t init_sdcard()
     Serial.println("Check pin 12 and 13, not grounded, or grounded with 10k resistors!\n\n");
     major_fail();
   }
-    sdmmc_host_t config = SDMMC_HOST_DEFAULT();
-    config.max_freq_khz = SDMMC_FREQ_PROBING;
 
   return ESP_OK;
 }
@@ -612,7 +610,7 @@ void capture(){
   
   //Save picture to microSD card
   fs::FS &fs = SD_MMC; 
-  File file = fs.open(path.c_str(),FILE_WRITE);
+  File file = SD_MMC.open(path.c_str(),FILE_WRITE);
   if(!file){
     Serial.printf("Failed to open file in writing mode");
   } 
@@ -1420,12 +1418,12 @@ void setup() {
   baton = xSemaphoreCreateMutex();
 
   // prio 6 - higher than the camera loop()
-  xTaskCreatePinnedToCore( the_camera_loop, "the_camera_loop", 3000, NULL, 5, &the_camera_loop_task, 0);
+  xTaskCreatePinnedToCore( the_camera_loop, "the_camera_loop", 4000, NULL, 5, &the_camera_loop_task, 0);
 
   delay(100);
 
   // prio 4 - higher than the cam_loop()
-  xTaskCreatePinnedToCore( the_sd_loop, "the_sd_loop", 2000, NULL, 4, &the_sd_loop_task, 0);  // prio 4, core 1
+  xTaskCreatePinnedToCore( the_sd_loop, "the_sd_loop", 8192, NULL, 1, &the_sd_loop_task, 1);  // prio 4, core 1
 
   delay(200);
 
@@ -1447,7 +1445,9 @@ void the_sd_loop (void* pvParameter) {
 
   while (1) {
     xSemaphoreTake( sd_go, portMAX_DELAY );            // we wait for camera loop to tell us to go
+    
     another_save_avi( fb_curr);                        // do the actual sd wrte
+    
     xSemaphoreGive( wait_for_sd );                     // tell camera loop we are done
   }
 }
@@ -1462,8 +1462,8 @@ void the_camera_loop (void* pvParameter) {
   Serial.print("the camera loop, core ");  Serial.print(xPortGetCoreID());
   Serial.print(", priority = "); Serial.println(uxTaskPriorityGet(NULL));
 
-  //frame_cnt = 0;
-  //start_record = 0;
+  frame_cnt = 0;
+  start_record = 0;
 
   delay(1000);
 
@@ -1662,7 +1662,7 @@ void loop() {
       // save the last HTTP GET Request
       previousMillis = currentMillis;
     }
-    delay(5000);
+    delay(13);
   }
 
   String httpGETRequest(const char* serverName) {
