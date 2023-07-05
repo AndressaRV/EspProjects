@@ -45,8 +45,15 @@ String dataHora;
 //esperar tempo de recebimento do gps
 unsigned long previousMillis = 0;
 const int interval = 5000; 
+//variáveis para temporização
+unsigned long startCaptureTime = 0;
+unsigned long currentCaptureTime = 0;
+unsigned long previousCaptureTime = 0;
+const unsigned long captureInterval = 30000; // Intervalo de 30 segundos para captura contínua
+const unsigned long captureDuration = 240000; // Duração de 4 minutos para captura contínua
 
 //booleanos
+bool requisicaoFoto = false;
 bool enviandoFoto = false;
 bool enviandoGPS = false;
 bool modoNoturno = false;
@@ -57,6 +64,8 @@ BluetoothSerial SerialBT; //bluetooth
 
 //numero da captura
 String pictureNumber;
+//parametro recebido por bluetooth
+int paramInt = 0;
 
 
 void setup() {
@@ -125,7 +134,7 @@ void initBT(String content){
 
 void btCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) { //recebe dados do bluetooth
   if (event == ESP_SPP_SRV_OPEN_EVT) {
-    Serial.println("Client Connected!");
+    Serial.println("\nClient Connected!");
   } else if (event == ESP_SPP_DATA_IND_EVT) {
     Serial.printf("ESP_SPP_DATA_IND_EVT len=%d, handle=%d\n\n", param->data_ind.len, param->data_ind.handle);
     
@@ -140,9 +149,15 @@ void btCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) { //recebe 
     } 
     else if(stringRead.toInt() >= 0 && stringRead.toInt() <= 4)
     {
-      int paramInt = stringRead.toInt();
+      paramInt = stringRead.toInt();
       Serial.printf("paramInt: %d\n", paramInt);
       setCameraParam(paramInt);
+    }
+    else if(stringRead.toInt() == 6)
+    {
+      Serial.printf("paramInt: %d\n", paramInt);
+      startCaptureTime = millis();
+      requisicaoFoto = true;
     }
   }
 }
@@ -380,7 +395,7 @@ void loop() {
       // save the last HTTP GET Request
       previousMillis = currentMillis;
     }
-    delay(5000);
+    delay(10);
   }
 
 String httpGETRequest(const char* serverName) {
@@ -414,7 +429,21 @@ void LoopDasCapturas(void* pvParameters)
   Serial.printf("\nloop2() em core: %d", xPortGetCoreID());//Mostra no monitor em qual core o loop2() foi chamado
   while (1)
   {
-    Serial.print("\nEstou funcionando");
-    delay(3000);
+    if(requisicaoFoto)
+    {
+      currentCaptureTime = millis();
+
+      if(currentCaptureTime >= captureDuration)
+      {
+        requisicaoFoto = false;
+        currentCaptureTime = 0;
+      }
+      else if(currentCaptureTime - previousCaptureTime >= captureInterval)
+      {
+        Serial.print("\nLogica das capturas");
+        previousCaptureTime = millis();
+      }
+    }
+    delay(10);
   }
 }
