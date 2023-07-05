@@ -1,3 +1,8 @@
+/* ******ESP32 CAM SIGEAUTO*******
+   *****ANDRESSA ROCHA VINHAL*****
+   ***Atualizado em 05/07/2023****
+*/
+
 #include "esp_camera.h"
 #define CAMERA_MODEL_AI_THINKER
 #include "camera_pins.h"
@@ -61,7 +66,7 @@ void setup() {
   pinMode(4, OUTPUT);               // Blinding Disk-Avtive Light
   digitalWrite(4, LOW);             // turn off
 
-  Serial.print("setup, core ");  Serial.print(xPortGetCoreID());
+  Serial.print("\n setup, core ");  Serial.print(xPortGetCoreID());
   Serial.print(", priority = "); Serial.println(uxTaskPriorityGet(NULL));
   
   initMicroSDCard();
@@ -92,6 +97,9 @@ void setup() {
   Serial.println("Connected to WiFi");
   
   initCamera(); //Inicia a camera
+
+  xTaskCreatePinnedToCore(LoopDasCapturas, "LoopDasCapturas", 8192, NULL, 1, NULL, 0);//Cria a tarefa "LoopDasCapturas()" com prioridade 1, atribuída ao core 0
+  delay(1);
 }
 
 //setup do bluetooth
@@ -245,7 +253,21 @@ void initMicroSDCard(){
   }
 }
 
-//Get the picture filename
+//faz a troca de caracteres inválidos
+String replaceInvalidCharacters(String str, char invalidChar, char replacementChar) {
+  String result = "";
+  for (size_t i = 0; i < str.length(); i++) {
+    char c = str.charAt(i);
+    if (c == invalidChar) {
+      result += replacementChar;
+    } else {
+      result += c;
+    }
+  }
+  return result;
+}
+
+//gera o nome do arquivo para salvar a imagem
 String getPictureFilename(){
   data.trim(); // Remove espaços em branco da string 'data'
   hora.trim(); // Remove espaços em branco da string 'hora'
@@ -385,4 +407,14 @@ String httpGETRequest(const char* serverName) {
   http.end();
 
   return payload;
+}
+
+void LoopDasCapturas(void* pvParameters)
+{
+  Serial.printf("\nloop2() em core: %d", xPortGetCoreID());//Mostra no monitor em qual core o loop2() foi chamado
+  while (1)
+  {
+    Serial.print("\nEstou funcionando");
+    delay(3000);
+  }
 }
