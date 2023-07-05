@@ -50,7 +50,7 @@ unsigned long startCaptureTime = 0;
 unsigned long currentCaptureTime = 0;
 unsigned long previousCaptureTime = 0;
 const unsigned long captureInterval = 30000; // Intervalo de 30 segundos para captura contínua
-const unsigned long captureDuration = 240000; // Duração de 4 minutos para captura contínua
+const unsigned long captureDuration = 120000; // Duração de 4 minutos para captura contínua
 
 //booleanos
 bool requisicaoFoto = false;
@@ -64,9 +64,11 @@ BluetoothSerial SerialBT; //bluetooth
 
 //numero da captura
 String pictureNumber;
+int numeroCaptura = 1;
 //parametro recebido por bluetooth
 int paramInt = 0;
-
+//nome da pasta para salvar capturas
+char nomePasta[100];
 
 void setup() {
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); // disable brownout detector
@@ -157,6 +159,12 @@ void btCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) { //recebe 
     {
       Serial.printf("paramInt: %d\n", paramInt);
       startCaptureTime = millis();
+      previousCaptureTime = 0;
+      sprintf(nomePasta, "/Pasta%d", numeroCaptura);
+      if(SD_MMC.mkdir(nomePasta))
+      {
+        Serial.printf("Pasta %s criada com sucesso", nomePasta);
+      };
       requisicaoFoto = true;
     }
   }
@@ -221,7 +229,7 @@ void initCamera(){
   s->set_exposure_ctrl(s, 1);  // 0 = disable , 1 = enable
   s->set_aec2(s, 0);           // 0 = disable , 1 = enable
   s->set_ae_level(s, 0);       // -2 to 2
-  s->set_aec_value(s, 600);    // 0 to 1200
+  s->set_aec_value(s, 1200);    // 0 to 1200
   s->set_gain_ctrl(s, 1);      // 0 = disable , 1 = enable
   s->set_agc_gain(s, 0);       // 0 to 30
   s->set_gainceiling(s, (gainceiling_t)0);  // 0 to 6
@@ -319,11 +327,11 @@ void setCameraParam(int paramInt){
       s->set_framesize(s, FRAMESIZE_HVGA);
     break;
   }
-  capture();
+  captureIndividual();
 }
 
-
-void capture(){
+//utilizada para a captura individual
+void captureIndividual(){
   if(enviandoGPS)
   {
     delay(200);
@@ -360,6 +368,41 @@ void capture(){
   file.close();
 
   writeSerialBT(fb);
+  esp_camera_fb_return(fb);
+}
+//utilizada para a captura continua
+void captureContinuous()
+{
+  camera_fb_t *fb = NULL;
+  esp_err_t res = ESP_OK;
+  fb = esp_camera_fb_get();
+  esp_camera_fb_return(fb); // dispose the buffered image
+  fb = NULL; // reset to capture errors
+  fb = esp_camera_fb_get(); // get fresh image
+  if(!fb){
+    esp_camera_fb_return(fb);
+    return;
+  }
+  
+  if(fb->format != PIXFORMAT_JPEG){
+    return;
+  }
+
+//path onde sera salva a captura no SD
+  String pathContinuous = String(nomePasta) + "/captura_" + numeroCaptura + ".jpg";
+  Serial.printf("\nPicture file name: %s\n", pathContinuous.c_str());
+  
+  fs::FS &fs = SD_MMC; 
+  File file = fs.open(pathContinuous.c_str(),FILE_WRITE);
+  if(!file){
+    Serial.printf("\nFailed to open file in writing mode");
+  } 
+  else {
+    file.write(fb->buf, fb->len); // payload (image), payload length
+    Serial.printf("\nSaved: %s\n", pathContinuous.c_str());
+  }
+  numeroCaptura++;
+  file.close();
   esp_camera_fb_return(fb);
 }
 
@@ -426,7 +469,7 @@ String httpGETRequest(const char* serverName) {
 
 void LoopDasCapturas(void* pvParameters)
 {
-  Serial.printf("\nloop2() em core: %d", xPortGetCoreID());//Mostra no monitor em qual core o loop2() foi chamado
+  Serial.printf("\nLoop das Capturas em core: %d", xPortGetCoreID());//Mostra no monitor em qual core o loop das capturas foi chamado
   while (1)
   {
     if(requisicaoFoto)
@@ -440,7 +483,7 @@ void LoopDasCapturas(void* pvParameters)
       }
       else if(currentCaptureTime - previousCaptureTime >= captureInterval)
       {
-        Serial.print("\nLogica das capturas");
+        captureContinuous();
         previousCaptureTime = millis();
       }
     }
