@@ -46,11 +46,12 @@ String dataHora;
 unsigned long previousMillis = 0;
 const int interval = 5000; 
 //variáveis para temporização
-unsigned long startCaptureTime = 0;
 unsigned long currentCaptureTime = 0;
 unsigned long previousCaptureTime = 0;
 const unsigned long captureInterval = 30000; // Intervalo de 30 segundos para captura contínua
-const unsigned long captureDuration = 120000; // Duração de 4 minutos para captura contínua
+//const unsigned long captureDuration = 120000; // Duração de 4 minutos para captura contínua
+int capturasDesejadas = 4;
+int capturasFeitas = 0;
 
 //booleanos
 bool requisicaoFoto = false;
@@ -158,8 +159,8 @@ void btCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) { //recebe 
     else if(stringRead.toInt() == 6)
     {
       Serial.printf("paramInt: %d\n", paramInt);
-      startCaptureTime = millis();
       previousCaptureTime = 0;
+      capturasFeitas = 0;
       sprintf(nomePasta, "/Pasta%d", numeroCaptura);
       if(SD_MMC.mkdir(nomePasta))
       {
@@ -476,14 +477,16 @@ void LoopDasCapturas(void* pvParameters)
     {
       currentCaptureTime = millis();
 
-      if(currentCaptureTime >= captureDuration)
+      if(capturasFeitas >= capturasDesejadas)
       {
         requisicaoFoto = false;
         currentCaptureTime = 0;
+        Serial.print("\nAcabaram as capturas");
       }
       else if(currentCaptureTime - previousCaptureTime >= captureInterval)
       {
         captureContinuous();
+        capturasFeitas++;
         previousCaptureTime = millis();
       }
     }
