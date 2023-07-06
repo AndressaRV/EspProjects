@@ -65,7 +65,7 @@ BluetoothSerial SerialBT; //bluetooth
 
 //numero da captura
 String pictureNumber;
-int numeroCaptura = 1;
+int numeroCaptura = 0;
 //parametro recebido por bluetooth
 int paramInt = 0;
 //nome da pasta para salvar capturas
@@ -161,11 +161,19 @@ void btCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) { //recebe 
       Serial.printf("paramInt: %d\n", paramInt);
       previousCaptureTime = 0;
       capturasFeitas = 0;
-      sprintf(nomePasta, "/Pasta%d", numeroCaptura);
+      numeroCaptura = 0;
+      data.trim(); hora.trim(); //remove espaços em branco das strings
+      data = replaceInvalidCharacters(data, '/', '-');
+      hora = replaceInvalidCharacters(hora, ':', '-');
+      sprintf(nomePasta, "/AULA%s%s", data, hora);
       if(SD_MMC.mkdir(nomePasta))
       {
         Serial.printf("Pasta %s criada com sucesso", nomePasta);
-      };
+      }
+      else
+      {
+        Serial.printf("Pasta não foi criada");
+      }
       requisicaoFoto = true;
     }
   }
