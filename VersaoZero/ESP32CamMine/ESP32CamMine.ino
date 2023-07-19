@@ -1,7 +1,8 @@
 /* ******ESP32 CAM SIGEAUTO*******
    *****ANDRESSA ROCHA VINHAL*****
-   ***Atualizado em 05/07/2023****
+   ***Atualizado em 10/07/2023****
 */
+
 
 #include "esp_camera.h"
 #define CAMERA_MODEL_AI_THINKER
@@ -23,7 +24,16 @@
 #include "FS.h"
 #include <SD_MMC.h>
 #include <EEPROM.h>
-#include "config.h" 
+#include <stdint.h>
+#include "dl_tool.hpp"
+#include "dl_detect_define.hpp"
+#include "human_face_detect_msr01.hpp"
+#include "human_face_detect_mnp01.hpp"
+
+int IMAGE_WIDTH;
+int IMAGE_HEIGHT;
+int IMAGE_CHANNEL;
+static uint8_t* IMAGE_ELEMENT = nullptr;
 
 //chars para lidar com o http e 8266
 const char* ssid = "CFC CAMERA";
@@ -48,12 +58,13 @@ const int interval = 5000;
 //variáveis para temporização
 unsigned long currentCaptureTime = 0;
 unsigned long previousCaptureTime = 0;
-const unsigned long captureInterval = 30000; // Intervalo de 30 segundos para captura contínua
+const unsigned long captureInterval = 15000; // Intervalo de 15 segundos para captura contínua
 //const unsigned long captureDuration = 120000; // Duração de 4 minutos para captura contínua
 int capturasDesejadas = 4;
 int capturasFeitas = 0;
 
 //booleanos
+bool requisicaoFotos = false;
 bool requisicaoFoto = false;
 bool enviandoFoto = false;
 bool enviandoGPS = false;
@@ -62,6 +73,7 @@ bool modoNoturno = false;
 //macaddress do esp32
 String macAddress = "SIGEAUTO_";
 BluetoothSerial SerialBT; //bluetooth
+//SemaphoreHandle_t sdSemaphore; //semaforo para usar o cartao sd
 
 //numero da captura
 String pictureNumber;
@@ -70,6 +82,45 @@ int numeroCaptura = 0;
 int paramInt = 0;
 //nome da pasta para salvar capturas
 char nomePasta[100];
+
+extern "C" void DetectFace(uint8_t* IMAGE_ELEMENT)
+{
+    dl::tool::Latency latency;
+
+    // initialize
+#if TWO_STAGE
+    HumanFaceDetectMSR01 s1(0.1F, 0.5F, 10, 0.2F);
+    HumanFaceDetectMNP01 s2(0.5F, 0.3F, 5);
+#else // ONE_STAGE
+    HumanFaceDetectMSR01 s1(0.3F, 0.5F, 10, 0.2F);
+#endif
+
+    // inference
+    latency.start();
+#if TWO_STAGE
+    std::list<dl::detect::result_t> &candidates = s1.infer((uint8_t *)IMAGE_ELEMENT, {IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_CHANNEL});
+    std::list<dl::detect::result_t> &results = s2.infer((uint8_t *)IMAGE_ELEMENT, {IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_CHANNEL}, candidates);
+#else // ONE_STAGE
+    std::list<dl::detect::result_t> &results = s1.infer((uint8_t *)IMAGE_ELEMENT, {IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_CHANNEL});
+#endif
+    latency.end();
+    latency.print("Inference latency");
+
+    // display
+    int i = 0;
+    for (std::list<dl::detect::result_t>::iterator prediction = results.begin(); prediction != results.end(); prediction++, i++)
+    {
+        printf("[%d] score: %f, box: [%d, %d, %d, %d]\n", i, prediction->score, prediction->box[0], prediction->box[1], prediction->box[2], prediction->box[3]);
+
+#if TWO_STAGE
+        printf("    left eye: (%3d, %3d), ", prediction->keypoint[0], prediction->keypoint[1]);
+        printf("right eye: (%3d, %3d)\n", prediction->keypoint[6], prediction->keypoint[7]);
+        printf("    nose: (%3d, %3d)\n", prediction->keypoint[4], prediction->keypoint[5]);
+        printf("    mouth left: (%3d, %3d), ", prediction->keypoint[2], prediction->keypoint[3]);
+        printf("mouth right: (%3d, %3d)\n\n", prediction->keypoint[8], prediction->keypoint[9]);
+#endif
+    }
+}
 
 void setup() {
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); // disable brownout detector
@@ -110,9 +161,13 @@ void setup() {
   
   initCamera(); //Inicia a camera
 
-  xTaskCreatePinnedToCore(LoopDasCapturas, "LoopDasCapturas", 8192, NULL, 1, NULL, 0);//Cria a tarefa "LoopDasCapturas()" com prioridade 1, atribuída ao core 0
+  //sdSemaphore = xSemaphoreCreateBinary();
+  //xSemaphoreGive(sdSemaphore);
+
+  xTaskCreatePinnedToCore(LoopDasCapturas, "LoopDasCapturas", 8192, NULL, 4, NULL, 0);//Cria a tarefa "LoopDasCapturas()" com prioridade 4, atribuída ao core 0
+  
   delay(1);
-}
+}// fim do setup
 
 //setup do bluetooth
 void initBT(String content){
@@ -155,6 +210,7 @@ void btCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) { //recebe 
       paramInt = stringRead.toInt();
       Serial.printf("paramInt: %d\n", paramInt);
       setCameraParam(paramInt);
+      requisicaoFoto = true;
     }
     else if(stringRead.toInt() == 6)
     {
@@ -174,7 +230,7 @@ void btCallback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) { //recebe 
       {
         Serial.printf("Pasta não foi criada");
       }
-      requisicaoFoto = true;
+      requisicaoFotos = true;
     }
   }
 }
@@ -211,12 +267,12 @@ void initCamera(){
   config.pixel_format = PIXFORMAT_JPEG;
   //init with high specs to pre-allocate larger buffers
   if(psramFound()){
-    config.frame_size = FRAMESIZE_HD;
-    config.jpeg_quality = 10;
+    config.frame_size = FRAMESIZE_VGA;
+    config.jpeg_quality = 8;
     config.fb_count = 1;
   } else {
-    config.frame_size = FRAMESIZE_SVGA;
-    config.jpeg_quality = 12;
+    config.frame_size = FRAMESIZE_VGA;
+    config.jpeg_quality = 10;
     config.fb_count = 1;
   }
 
@@ -336,15 +392,11 @@ void setCameraParam(int paramInt){
       s->set_framesize(s, FRAMESIZE_HVGA);
     break;
   }
-  captureIndividual();
 }
 
-//utilizada para a captura individual
-void captureIndividual(){
-  if(enviandoGPS)
-  {
-    delay(200);
-  }
+//utilizada para a captura continua
+void captureContinuous()
+{
   enviandoFoto = true;
   camera_fb_t *fb = NULL;
   esp_err_t res = ESP_OK;
@@ -361,43 +413,13 @@ void captureIndividual(){
     return;
   }
 
-//path onde sera salva a captura no SD
-  String path = getPictureFilename();
-  Serial.printf("Picture file name: %s\n", path.c_str());
-  
-  fs::FS &fs = SD_MMC; 
-  File file = fs.open(path.c_str(),FILE_WRITE);
-  if(!file){
-    Serial.printf("Failed to open file in writing mode");
-  } 
-  else {
-    file.write(fb->buf, fb->len); // payload (image), payload length
-    Serial.printf("Saved: %s\n", path.c_str());
-  }
-  file.close();
+// Salvar a imagem capturada na variável global
+  IMAGE_ELEMENT = {fb->buf};
+  IMAGE_WIDTH = {fb->width};
+  IMAGE_HEIGHT = {fb->height};
+  IMAGE_CHANNEL = {fb->format};
 
-  writeSerialBT(fb);
-  esp_camera_fb_return(fb);
-}
-//utilizada para a captura continua
-void captureContinuous()
-{
-  camera_fb_t *fb = NULL;
-  esp_err_t res = ESP_OK;
-  fb = esp_camera_fb_get();
-  esp_camera_fb_return(fb); // dispose the buffered image
-  fb = NULL; // reset to capture errors
-  fb = esp_camera_fb_get(); // get fresh image
-  if(!fb){
-    esp_camera_fb_return(fb);
-    return;
-  }
-  
-  if(fb->format != PIXFORMAT_JPEG){
-    return;
-  }
-
-//path onde sera salva a captura no SD
+  //path onde sera salva a captura no SD
   String pathContinuous = String(nomePasta) + "/captura_" + numeroCaptura + ".jpg";
   Serial.printf("\nPicture file name: %s\n", pathContinuous.c_str());
   
@@ -412,7 +434,12 @@ void captureContinuous()
   }
   numeroCaptura++;
   file.close();
+
+  // Chamando a função DetectFace
+  DetectFace(IMAGE_ELEMENT);
+
   esp_camera_fb_return(fb);
+  enviandoFoto = false;
 }
 
 void loop() {
@@ -420,8 +447,8 @@ void loop() {
   
   if(currentMillis - previousMillis >= interval) {
 
-      if(!enviandoFoto)
-      {
+      //if(!enviandoFoto)
+      //{
       enviandoGPS = true;
       latitude = httpGETRequest(serverNameLati);
       longitude = httpGETRequest(serverNameLong);
@@ -438,11 +465,11 @@ void loop() {
       SerialBT.print(velocidade);
       SerialBT.print(dataHora);
       enviandoGPS = false;
-      }
-      else
-      {
-        Serial.print("Estou ocupado enviando uma foto...");
-      }
+      //}
+      //else
+      //{
+      //  Serial.print("Estou ocupado enviando uma foto...");
+      //}
       
       // save the last HTTP GET Request
       previousMillis = currentMillis;
@@ -481,22 +508,30 @@ void LoopDasCapturas(void* pvParameters)
   Serial.printf("\nLoop das Capturas em core: %d", xPortGetCoreID());//Mostra no monitor em qual core o loop das capturas foi chamado
   while (1)
   {
-    if(requisicaoFoto)
+    if(requisicaoFotos)
     {
-      currentCaptureTime = millis();
+      //if (xSemaphoreTake(sdSemaphore, pdMS_TO_TICKS(300)) == pdTRUE)
+      //{
+        currentCaptureTime = millis();
 
-      if(capturasFeitas >= capturasDesejadas)
-      {
-        requisicaoFoto = false;
-        currentCaptureTime = 0;
-        Serial.print("\nAcabaram as capturas");
-      }
-      else if(currentCaptureTime - previousCaptureTime >= captureInterval)
-      {
-        captureContinuous();
-        capturasFeitas++;
-        previousCaptureTime = millis();
-      }
+        if(capturasFeitas >= capturasDesejadas)
+        {
+          requisicaoFotos = false;
+          Serial.print("\nAcabaram as capturas");
+          SerialBT.print("Done");
+        }
+        else if(currentCaptureTime - previousCaptureTime >= captureInterval)
+        {
+          captureContinuous();
+          capturasFeitas++;
+          previousCaptureTime = millis();
+        }
+        //xSemaphoreGive(sdSemaphore);
+      //} 
+      //else 
+      //{
+        //Serial.println("Timeout ao adquirir o semáforo");
+      //}
     }
     delay(10);
   }
